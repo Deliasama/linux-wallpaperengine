@@ -1,5 +1,7 @@
 #include "UIWindow.h"
+#include "Qt/SingleInstanceManager.h"
 #include <QtConcurrent/qtconcurrentrun.h>
+#include <cstddef>
 #include <iostream>
 #include <qapplication.h>
 #include <qboxlayout.h>
@@ -9,22 +11,27 @@
 #include <qlabel.h>
 #include <qlayout.h>
 #include <qlineedit.h>
+#include <qlocalsocket.h>
+#include <qmenu.h>
 #include <qnamespace.h>
 #include <qprocess.h>
 #include <qpushbutton.h>
+#include <qsystemtrayicon.h>
 #include <qwidget.h>
 #include <qwindowdefs.h>
+#include <QByteArray>
 #include <string>
 #include <strings.h>
 #include <vector>
 
 #define PICTURE_SIZE 128
 
-UIWindow::UIWindow(QWidget* parent, QApplication* qapp) {
+UIWindow::UIWindow(QWidget* parent, QApplication* qapp, SingleInstanceManager* ig) {
   this->qapp = qapp; 
   this->screenSelector = new QComboBox(this);
   this->extraFlagsInput = new QLineEdit(this);
   this->wallpaperEngine = new QProcess(this);
+  this->instanceGuard = ig;
   this->buttonLayout = new QGridLayout(this);
 }
 
@@ -93,6 +100,14 @@ void UIWindow::setupUIWindow(std::vector<std::string> wallpaperPaths) {
   QObject::connect(this->qapp, &QCoreApplication::aboutToQuit, this, [this]() {
     wallpaperEngine->terminate(); 
     wallpaperEngine->waitForFinished(3000);
+
+    instanceGuard->cleanUpServer();
+  });
+
+  QObject::connect(instanceGuard, &SingleInstanceManager::messageReceived, [this](const QByteArray& msg) {
+    if (msg == "show") {
+      if (this->isHidden()) show();
+    }
   });
 
   container->setLayout(buttonLayout);
@@ -137,12 +152,37 @@ void UIWindow::setupUIWindow(std::vector<std::string> wallpaperPaths) {
   
   // update Buttons
   updateSelectedButton();
+
+  // SYSTEM TRAY
+  auto* trayIcon = new QSystemTrayIcon(QIcon::fromTheme("folder"));
+
+  auto* trayMenu = new QMenu();
+
+  auto* showAction = new QAction("Show");
+  connect(showAction, &QAction::triggered, [this]() {
+    this->show();
+  });
+
+  auto* closeAction = new QAction("Quit");
+  connect(closeAction, &QAction::triggered, [this]() {
+    this->qapp->quit();
+  });
+
+  trayMenu->addActions({showAction, closeAction});
+  trayIcon->setContextMenu(trayMenu);
+  trayIcon->setToolTip("Linux-Wallpaperengine");
+  trayIcon->show();
 }
 
 void UIWindow::showEvent(QShowEvent* event) {
   QtConcurrent::run([this]() {
     
   });
+}
+
+void UIWindow::closeEvent(QCloseEvent* event) {
+  this->hide();
+  event->ignore();
 }
 
 void UIWindow::startNewWallpaperEngine() {
@@ -158,6 +198,7 @@ void UIWindow::startNewWallpaperEngine() {
   QStringList args;
 
   for (auto wallpaper : this->selectedWallpapers) {
+    if (wallpaper.first == "" || wallpaper.second == "") continue;
     args.push_back("--screen-root");
     args.push_back(QString::fromStdString(wallpaper.first));
     if (!extraFlags[wallpaper.first].empty()) {
@@ -187,7 +228,7 @@ void UIWindow::updateSelectedButton() {
       if (button->property("path").toString().toStdString() == selected) {
         button->setStyleSheet("background-color: #4488ff; color white; border: 2px solid #0055cc");
       } else {
-        button->setStyleSheet("background-color: #4A4D51; color white; border: 2px solid #2B2A33");
+        button->setStyleSheet("background-color: #4A4D51; color white; border: 2px solid #3B3A43");
       }
     }
   }
