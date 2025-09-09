@@ -257,7 +257,7 @@ void UIWindow::startNewWallpaperEngine() {
   if (wallpaperEngine->state() == QProcess::Running) {
     // Stop WallpaperProcess
     wallpaperEngine->terminate();
-    if (!wallpaperEngine->waitForFinished(3000)) {
+    if (!wallpaperEngine->waitForFinished(1000)) {
       wallpaperEngine->kill();
       wallpaperEngine->waitForFinished();
 
@@ -288,7 +288,7 @@ void UIWindow::startNewWallpaperEngine() {
 
   // start Wallpaper Process
   wallpaperEngine->start(QCoreApplication::applicationFilePath(), args);
-  if (!wallpaperEngine->waitForStarted(3000)) {
+  if (!wallpaperEngine->waitForStarted(1000)) {
     sLog.out(wallpaperEngine->error());
   }
 }

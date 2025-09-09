@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <csignal>
 #include <iostream>
 #include <QApplication>
@@ -45,7 +46,7 @@ void initLogging ()
 int main (int argc, char* argv[]) {
     initLogging ();
 
-    if (argc <= 1) {
+    if (argc <= 1 || (argc == 2 && std::string(argv[1]) == "--hide" || std::string(argv[1]) == "-h")) {
       QApplication qapp(argc, argv);
       globalApp = &qapp;
 
@@ -95,7 +96,8 @@ int main (int argc, char* argv[]) {
 
       uiWindow->setupUIWindow(wallpaperPaths);
 
-      uiWindow->show();
+      if (argc != 2 || (std::string(argv[1]) != "--hide" && std::string(argv[1]) != "-h"))
+        uiWindow->show();
 
       return qapp.exec();
     }
