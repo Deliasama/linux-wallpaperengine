@@ -98,6 +98,11 @@ Now you can run the program using the following command:
 ./linux-wallpaperengine
 ```
 
+You can also start the application with the -h or --hide flag to hide the gui:
+```
+./linux-wallpaperengine -h
+```
+
 #### Wayland
 Has only been tested under wlroots but should work on any flavour as long as wlr-layer-shell-unstable is supported.
 
