@@ -5,7 +5,8 @@
 #include <QtConcurrent/qtconcurrentrun.h>
 #include <X11/X.h>
 #include <cstddef>
-#include <iostream>
+#include <filesystem>
+#include <fstream>
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 #include <qapplication.h>
@@ -31,15 +32,17 @@
 #include <QByteArray>
 #include <string>
 #include <strings.h>
+#include <unistd.h>
 #include <vector>
 #include <QToolButton>
 #include <QGroupBox>
 #include "Qt/WallpaperSettingsWidget.h"
 #include "WallpaperButton.h"
+#include "WallpaperEngine/Logging/CLog.h"
 
 #define PICTURE_SIZE 128
 
-UIWindow::UIWindow(QWidget* parent, QApplication* qapp, SingleInstanceManager* ig) {
+UIWindow::UIWindow(QWidget* parent, QApplication* qapp, SingleInstanceManager* ig, const std::string& appDataLocation) {
   this->qapp = qapp; 
   this->screenSelector = new QComboBox(this);
   this->wallpaperEngine = new QProcess(this);
@@ -47,6 +50,25 @@ UIWindow::UIWindow(QWidget* parent, QApplication* qapp, SingleInstanceManager* i
   this->buttonLayout = new QGridLayout(this);
 
   this->wallpaperSettingsWidget = nullptr;
+
+  this->appDataPath = appDataLocation;
+
+  if (!std::filesystem::exists(this->appDataPath + "selectedWallpapers.json")) {
+    std::ofstream ofs(this->appDataPath + "selectedWallpapers.json");
+    if (!ofs) {
+      sLog.error("Failed to create file");
+      return;
+    }
+    nlohmann::json j = nlohmann::json::object();
+    ofs << j.dump(4);
+    ofs.close();
+  }
+  std::ifstream file(this->appDataPath + "selectedWallpapers.json");
+  if (!file) {
+    sLog.error("Failed to open file");
+  }
+  this->selectedWallpapersJSON = nlohmann::json::parse(file);
+  file.close();
 }
 
 void UIWindow::setupUIWindow(std::vector<std::string> wallpaperPaths) {
@@ -71,13 +93,16 @@ void UIWindow::setupUIWindow(std::vector<std::string> wallpaperPaths) {
   for (size_t i = 0; i < wallpaperPaths.size(); i++) {
     auto* button = new WallpaperButton(this, wallpaperPaths[i]);
     
+    // Button clicked
     QAbstractButton::connect(button, &QPushButton::clicked, [button, this]() {
       QString clickedPath = button->property("path").toString();
       button->setEnabled(false);
-
-      this->selectedWallpapers[this->screenSelector->currentText().toStdString()] = clickedPath.toStdString();
-      
-      // startNewWallpaperEngine();
+      if (this->selectedWallpapers[this->screenSelector->currentText().toStdString()] == clickedPath.toStdString()) {
+        // deselect wallpaper
+        this->selectedWallpapers[this->screenSelector->currentText().toStdString()] = "";
+      } else {
+        this->selectedWallpapers[this->screenSelector->currentText().toStdString()] = clickedPath.toStdString();
+      }
       // Doesn't need to start a new WallpaperEngine here since update wallpaperSettings does emit applySettings()
       updateSelectedButton();
       this->wallpaperSettingsWidget->update(this->selectedWallpapers[this->screenSelector->currentText().toStdString()]);
@@ -110,6 +135,7 @@ void UIWindow::setupUIWindow(std::vector<std::string> wallpaperPaths) {
   // screen select dropdown
   const QList<QScreen*> screens = QGuiApplication::screens();
   for (QScreen* screen : screens) {
+    this->selectedWallpapers[screen->name().toStdString()] = "";
     this->screenSelector->addItem(screen->name());
   }
   this->screenSelector->setCurrentIndex(0);
@@ -162,9 +188,11 @@ void UIWindow::setupUIWindow(std::vector<std::string> wallpaperPaths) {
   // right side
   this->wallpaperSettingsWidget = new WallpaperSettingsWidget(splitWidget);
 
-  connect(this->wallpaperSettingsWidget, &WallpaperSettingsWidget::applySettings, this, [this](const std::string& flags) {
-    this->extraFlags[this->screenSelector->currentText().toStdString()] = split(flags, ' ');
+  connect(this->wallpaperSettingsWidget, &WallpaperSettingsWidget::applySettings, this, [this](const std::string& flags, const std::string& individualFlags) {
+    globalFlags = flags;
+    this->extraFlags[this->screenSelector->currentText().toStdString()] = split(individualFlags, ' ');
     startNewWallpaperEngine();
+    // updateStoredSelectedWallpapers();
   });
   
   splitLayout->addWidget(leftWidget, 2);
@@ -172,9 +200,6 @@ void UIWindow::setupUIWindow(std::vector<std::string> wallpaperPaths) {
 
   mainlayout->addWidget(splitWidget);
   this->setLayout(mainlayout);
-  
-  // update Buttons
-  updateSelectedButton();
   
   // SYSTEM TRAY
   auto* trayIcon = new QSystemTrayIcon(QIcon(":/assets/wallpaper-icon.png"));
@@ -197,31 +222,56 @@ void UIWindow::setupUIWindow(std::vector<std::string> wallpaperPaths) {
       } 
     }
   });
+  // apply stored Selected wallpapers
+  for (const auto& n : this->selectedWallpapers) {
+    nlohmann::json obj = this->selectedWallpapersJSON[n.first];
+    if (!obj.is_object()) continue;
+
+    std::string wallpaper = obj.value("wallpaper", "");
+
+    if (wallpaper.empty()) continue;
+    if (this->selectedWallpapers.find(n.first) == this->selectedWallpapers.end()) continue;
+    this->selectedWallpapers[n.first] = wallpaper;
+  }
+  // updateSelectedButtons
+  updateSelectedButton();
+  this->wallpaperSettingsWidget->update(this->selectedWallpapers[this->screenSelector->currentText().toStdString()]);
 }
 
 void UIWindow::showEvent(QShowEvent* event) {
-  QtConcurrent::run([this]() {
-    
-  });
 }
 
 void UIWindow::closeEvent(QCloseEvent* event) {
   this->hide();
+
+  updateStoredSelectedWallpapers();
+
   event->ignore();
 }
 
 void UIWindow::startNewWallpaperEngine() {
+
+  for (const auto& n : this->extraFlags) {
+    std::string str;
+    for (const auto& s : n.second) {
+       str.append(s);
+    }
+  }
   if (wallpaperEngine->state() == QProcess::Running) {
     // Stop WallpaperProcess
     wallpaperEngine->terminate();
-    if (!wallpaperEngine->waitForFinished(3000)) {
+    if (!wallpaperEngine->waitForFinished(1000)) {
       wallpaperEngine->kill();
       wallpaperEngine->waitForFinished();
+
     }
   }
-  // delete this->wallpaperEngine;
   // create args
   QStringList args;
+  
+  for (const auto& f : split(globalFlags, ' ')) {
+    args.push_back(QString::fromStdString(f));
+  }
 
   for (const auto &wallpaper : this->selectedWallpapers) {
     if (wallpaper.first == "" || wallpaper.second == "") continue;
@@ -234,11 +284,20 @@ void UIWindow::startNewWallpaperEngine() {
     args.push_back(QString::fromStdString(wallpaper.second));
   }
 
+  std::string argsStr;
+  for (const auto& s : args) {
+    argsStr.append(s.toStdString() + " ");
+  }
+
   // start Wallpaper Process
   wallpaperEngine->start(QCoreApplication::applicationFilePath(), args);
+  if (!wallpaperEngine->waitForStarted(1000)) {
+    sLog.out(wallpaperEngine->error());
+  }
 }
 
 void UIWindow::updateSelectedButton() {
+  std::string selected = this->selectedWallpapers[this->screenSelector->currentText().toStdString()];
   for (int i = 0; i < this->buttonLayout->rowCount(); i++) {
     for (int j = 0; j < this->buttonLayout->columnCount(); j++) {
       auto* item = this->buttonLayout->itemAtPosition(i, j);
@@ -252,7 +311,6 @@ void UIWindow::updateSelectedButton() {
 
       button->setEnabled(true);
 
-      std::string selected = this->selectedWallpapers[this->screenSelector->currentText().toStdString()];
       QString currentStyle = button->styleSheet();
       QString newStyle = currentStyle;
       if (button->property("path").toString().toStdString() == selected) {
@@ -264,6 +322,20 @@ void UIWindow::updateSelectedButton() {
       }
     }
   }
+}
+
+void UIWindow::updateStoredSelectedWallpapers() {
+  std::ofstream file(this->appDataPath + "selectedWallpapers.json");
+  if (!file) {
+    sLog.error("Failed to create file!");
+    return;
+  }
+  for (const auto& wallpaper : this->selectedWallpapers) {
+    this->selectedWallpapersJSON[wallpaper.first]["wallpaper"] = wallpaper.second;
+    this->selectedWallpapersJSON[wallpaper.first]["flags"] = "";
+  }
+  file << this->selectedWallpapersJSON.dump(4);
+  file.close();
 }
 
 std::vector<std::string> UIWindow::split(const std::string &str, char delimiter) {

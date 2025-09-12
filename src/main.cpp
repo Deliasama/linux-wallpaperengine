@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <csignal>
 #include <iostream>
 #include <QApplication>
@@ -16,7 +17,6 @@
 #include "WallpaperEngine/Application/CApplicationContext.h"
 #include "WallpaperEngine/Application/CWallpaperApplication.h"
 #include "WallpaperEngine/Logging/CLog.h"
-#include "WallpaperEngine/WebBrowser/CWebBrowserContext.h"
 
 WallpaperEngine::Application::CWallpaperApplication* appPointer;
 QCoreApplication* globalApp = nullptr;
@@ -46,10 +46,7 @@ void initLogging ()
 int main (int argc, char* argv[]) {
     initLogging ();
 
-    std::cout << QStandardPaths::writableLocation(QStandardPaths::AppDataLocation).toStdString() << "\n";
-
-
-    if (argc <= 1) {
+    if (argc <= 1 || (argc == 2 && std::string(argv[1]) == "--hide" || std::string(argv[1]) == "-h")) {
       QApplication qapp(argc, argv);
       globalApp = &qapp;
 
@@ -59,6 +56,25 @@ int main (int argc, char* argv[]) {
         sLog.out("App is already running!");
         return 0;
       }
+
+      std::string appDataLocation;
+      
+      // TODO: Use desktop file as marker
+      // Data directory
+      if (QCoreApplication::applicationDirPath() == INSTALL_PREFIX) {
+        // is installed properly
+        appDataLocation = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation).toStdString() + "/";
+      } else {
+        // is not installed
+        appDataLocation = QCoreApplication::applicationDirPath().toStdString() + "/appData/";
+      }
+      sLog.out("AppDataLocation: " + appDataLocation);
+      if (!std::filesystem::exists(appDataLocation)) {
+        if (!std::filesystem::create_directory(appDataLocation)) {
+          sLog.error("Could't create appData directory");
+        }
+      }
+
       std::string path = Steam::FileSystem::workshopDirectory(431960);
       sLog.out("Found workshopDirectory: " + path);
 
@@ -76,11 +92,12 @@ int main (int argc, char* argv[]) {
 
       sLog.out("Starting App..");
 
-      auto* uiWindow = new UIWindow(nullptr, &qapp, g_instanceManager);
+      auto* uiWindow = new UIWindow(nullptr, &qapp, g_instanceManager, appDataLocation);
 
       uiWindow->setupUIWindow(wallpaperPaths);
 
-      uiWindow->show();
+      if (argc != 2 || (std::string(argv[1]) != "--hide" && std::string(argv[1]) != "-h"))
+        uiWindow->show();
 
       return qapp.exec();
     }

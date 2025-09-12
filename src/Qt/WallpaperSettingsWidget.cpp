@@ -1,9 +1,10 @@
 #include "WallpaperSettingsWidget.h"
+#include "WallpaperEngine/Logging/CLog.h"
 #include <fstream>
-#include <memory>
 #include <nlohmann/json_fwd.hpp>
 #include <qchar.h>
 #include <qcheckbox.h>
+#include <qcombobox.h>
 #include <qformlayout.h>
 #include <qgroupbox.h>
 #include <qlineedit.h>
@@ -12,16 +13,15 @@
 #include <qobjectdefs.h>
 #include <qpushbutton.h>
 #include <qslider.h>
+#include <qtmetamacros.h>
 #include <qwidget.h>
 #include <string>
 #include <nlohmann/json.hpp>
 #include <QCheckBox>
 #include <QLineEdit>
 #include <QComboBox>
+#include <QListView>
 #include <variant>
-#include <iostream>
-#include "WallpaperEngine/Assets/CCombinedContainer.h"
-#include "WallpaperEngine/Logging/CLog.h"
 
 WallpaperSettingsWidget::WallpaperSettingsWidget(QWidget* parent)
   : QWidget(parent) {
@@ -59,7 +59,14 @@ WallpaperSettingsWidget::WallpaperSettingsWidget(QWidget* parent)
 }
 
 void WallpaperSettingsWidget::update(const std::string& selected) {
-  if (selected.empty()) return;
+  if (selected.empty()) {
+    clearSettings();
+
+    preview.image->setPixmap(QPixmap());
+    preview.title->setText("(No Wallpaper Selected)");
+    emit applySettings("", "");
+    return;
+  };
 
   this->currentWallpaperPath = selected;
 
@@ -121,17 +128,27 @@ void WallpaperSettingsWidget::updateSettings(const std::string& wallpaperPath, c
     }
   }
   */
+  auto * scalingBox = new QComboBox();
+  scalingBox->addItems({"stretch", "fit", "fill", "default"});
+  scalingBox->setView(new QListView());
+  scalingBox->view()->setStyleSheet(
+    "QListView { background-color:#2B2A33; selection-background-color:#4488FF; color:white; }"
+    "QListView::item:hover { background-color:#4488FF; }"
+  );
 
-  this->currentOptions.push_back({createStyledCheckBox(this->checkboxStyleSheet), "Mute Audio:", "mute_audio", "--silent", false, false});
-  this->currentOptions.push_back({new QSlider(Qt::Horizontal), "Volume:", "volume", "--volume", true, 50});
-  this->currentOptions.push_back({createStyledCheckBox(this->checkboxStyleSheet), "Disable Automute:", "disable_automute", "--noautomute", false, false});
-  this->currentOptions.push_back({createStyledCheckBox(this->checkboxStyleSheet), "Disable Audio Reaction:", "disable_audio_reaction", "--no-audio-processing", false, false});
-  this->currentOptions.push_back({new QLineEdit(), "FPS:", "fps", "--fps", true, 30});
-  this->currentOptions.push_back({new QComboBox(), "Scaling:", "scaling", "--scaling", true});
-  this->currentOptions.push_back({new QComboBox(), "Clamping:", "clamping", "--clamping", true});
-  this->currentOptions.push_back({createStyledCheckBox(this->checkboxStyleSheet), "Disable Mouse:", "diable_mouse", "--disable-mouse", false, false});
-  this->currentOptions.push_back({createStyledCheckBox(this->checkboxStyleSheet), "Disable Parallax", "disable_parallax", "--disable-parallax", false, true});
-  this->currentOptions.push_back({createStyledCheckBox(this->checkboxStyleSheet), "Disable Fullscreen Pause:", "disable_fullscreen_pause", "--no-fullscreen-pause", true, false});
+  auto* clampingBox = new QComboBox();
+  // clampingBox->addItems({"clamp", "border", "repeat"});
+
+  this->currentOptions.push_back({createStyledCheckBox(this->checkboxStyleSheet), "Mute Audio:", "mute_audio", "--silent", false, true, false});
+  this->currentOptions.push_back({new QSlider(Qt::Horizontal), "Volume:", "volume", "--volume", true, true, 50});
+  this->currentOptions.push_back({createStyledCheckBox(this->checkboxStyleSheet), "Disable Automute:", "disable_automute", "--noautomute", false, true, false});
+  this->currentOptions.push_back({createStyledCheckBox(this->checkboxStyleSheet), "Disable Audio Reaction:", "disable_audio_reaction", "--no-audio-processing", false, true, false});
+  this->currentOptions.push_back({new QLineEdit(), "FPS:", "fps", "--fps", true, true, 30});
+  this->currentOptions.push_back({scalingBox, "Scaling:", "scaling", "--scaling", true, false, "default"});
+  this->currentOptions.push_back({clampingBox, "Clamping:", "clamping", "--clamping", true, false, ""});
+  this->currentOptions.push_back({createStyledCheckBox(this->checkboxStyleSheet), "Disable Mouse:", "diable_mouse", "--disable-mouse", false, true, false});
+  this->currentOptions.push_back({createStyledCheckBox(this->checkboxStyleSheet), "Disable Parallax", "disable_parallax", "--disable-parallax", false, true, true});
+  this->currentOptions.push_back({createStyledCheckBox(this->checkboxStyleSheet), "Disable Fullscreen Pause:", "disable_fullscreen_pause", "--no-fullscreen-pause", true, true, false});
 
   for (const Option& opt : this->currentOptions) {
     this->settingsLayout->addRow(opt.labelName, opt.widget);
@@ -151,6 +168,12 @@ void WallpaperSettingsWidget::updateSettings(const std::string& wallpaperPath, c
     if (auto* lineEdit = dynamic_cast<QLineEdit*>(opt.widget)) {
       if (std::holds_alternative<int>(opt.defaultValue)) {
         lineEdit->setText(QString::fromStdString(std::to_string(std::get<int>(opt.defaultValue))));
+      }
+      continue;
+    }
+    if (auto* comboBox = dynamic_cast<QComboBox*>(opt.widget)) {
+      if (std::holds_alternative<QString>(opt.defaultValue)) {
+        comboBox->setCurrentText(std::get<QString>(opt.defaultValue));
       }
       continue;
     }
@@ -174,6 +197,7 @@ void WallpaperSettingsWidget::clearSettings() {
 
 void WallpaperSettingsWidget::apply() {
   if (currentWallpaperPath.empty()) return;
+  std::string individualFlag;
   std::string flags;
 
   for (const Option& opt : this->currentOptions) {
@@ -192,10 +216,26 @@ void WallpaperSettingsWidget::apply() {
     }
     if (auto* lineEdit = dynamic_cast<QLineEdit*>(opt.widget)) {
       std::string value = lineEdit->text().toStdString();
-      flags.append(opt.flag + " ");
-      if (opt.flagHasValue) flags.append(value + " ");
+      if (opt.oneTimeFlag) {
+        flags.append(opt.flag + " ");
+        if (opt.flagHasValue) flags.append(value + " ");
+      } else {
+        individualFlag.append(opt.flag + " ");
+        if (opt.flagHasValue) individualFlag.append(value + " ");
+      }
+      continue;
+    }
+    if (auto* comboBox = dynamic_cast<QComboBox*>(opt.widget)) {
+      QString value = comboBox->currentText();
+      if (opt.oneTimeFlag) {
+        flags.append(opt.flag + " ");
+        if (opt.flagHasValue) flags.append(value.toStdString() + " ");
+      } else {
+        individualFlag.append(opt.flag + " ");
+        if (opt.flagHasValue) individualFlag.append(value.toStdString() + " ");
+      }
       continue;
     }
   }
-  emit applySettings(flags);
+  emit applySettings(flags, individualFlag);
 }
