@@ -93,13 +93,16 @@ void UIWindow::setupUIWindow(std::vector<std::string> wallpaperPaths) {
   for (size_t i = 0; i < wallpaperPaths.size(); i++) {
     auto* button = new WallpaperButton(this, wallpaperPaths[i]);
     
+    // Button clicked
     QAbstractButton::connect(button, &QPushButton::clicked, [button, this]() {
       QString clickedPath = button->property("path").toString();
       button->setEnabled(false);
-
-      this->selectedWallpapers[this->screenSelector->currentText().toStdString()] = clickedPath.toStdString();
-      
-      // startNewWallpaperEngine();
+      if (this->selectedWallpapers[this->screenSelector->currentText().toStdString()] == clickedPath.toStdString()) {
+        // deselect wallpaper
+        this->selectedWallpapers[this->screenSelector->currentText().toStdString()] = "";
+      } else {
+        this->selectedWallpapers[this->screenSelector->currentText().toStdString()] = clickedPath.toStdString();
+      }
       // Doesn't need to start a new WallpaperEngine here since update wallpaperSettings does emit applySettings()
       updateSelectedButton();
       this->wallpaperSettingsWidget->update(this->selectedWallpapers[this->screenSelector->currentText().toStdString()]);
@@ -232,7 +235,7 @@ void UIWindow::setupUIWindow(std::vector<std::string> wallpaperPaths) {
   }
   // updateSelectedButtons
   updateSelectedButton();
-  startNewWallpaperEngine();
+  this->wallpaperSettingsWidget->update(this->selectedWallpapers[this->screenSelector->currentText().toStdString()]);
 }
 
 void UIWindow::showEvent(QShowEvent* event) {

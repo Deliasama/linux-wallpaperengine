@@ -58,7 +58,14 @@ WallpaperSettingsWidget::WallpaperSettingsWidget(QWidget* parent)
 }
 
 void WallpaperSettingsWidget::update(const std::string& selected) {
-  if (selected.empty()) return;
+  if (selected.empty()) {
+    clearSettings();
+
+    preview.image->setPixmap(QPixmap());
+    preview.title->setText("(No Wallpaper Selected)");
+    apply();
+    return;
+  };
 
   this->currentWallpaperPath = selected;
 
