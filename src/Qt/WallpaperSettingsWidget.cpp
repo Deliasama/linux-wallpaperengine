@@ -13,6 +13,7 @@
 #include <qobjectdefs.h>
 #include <qpushbutton.h>
 #include <qslider.h>
+#include <qtmetamacros.h>
 #include <qwidget.h>
 #include <string>
 #include <nlohmann/json.hpp>
@@ -63,7 +64,7 @@ void WallpaperSettingsWidget::update(const std::string& selected) {
 
     preview.image->setPixmap(QPixmap());
     preview.title->setText("(No Wallpaper Selected)");
-    apply();
+    emit applySettings("", "");
     return;
   };
 
